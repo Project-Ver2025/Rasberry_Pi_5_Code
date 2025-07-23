@@ -613,6 +613,8 @@ def watch_gpio_button(loop, chip_path, line_offsets):
         while True:
             for event in request.read_edge_events():
                 if event.line_offset == 2:
+                    # This method allows us to schedule the given task which may be running on a different thread
+                    # back on the original thread
                     asyncio.run_coroutine_threadsafe(handle_main_button(loop), loop)
                 elif event.line_offset == 3:
                     asyncio.run_coroutine_threadsafe(handle_cancel_button(), loop)
