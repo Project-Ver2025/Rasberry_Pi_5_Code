@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bluetooth Scanner</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    ul { list-style: none; padding: 0; }
+    li { margin: 10px 0; cursor: pointer; background: #eee; padding: 10px; border-radius: 5px; }
+    li:hover { background: #ccc; }
+    button { padding: 10px 20px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+
+<h2>Python Bluetooth Scanner</h2>
+<button onclick="scan()">Scan for Devices</button>
+<ul id="deviceList"></ul>
+
+<script>
+  async function scan() {
+    const list = document.getElementById('deviceList');
+    list.innerHTML = '<li>Scanning...</li>';
+
+    try {
+      const response = await fetch('/scan');
+      const devices = await response.json();
+
+      list.innerHTML = '';
+
+      if (devices.length === 0) {
+        list.innerHTML = '<li>No devices found</li>';
+        return;
+      }
+
+      devices.forEach(device => {
+        const li = document.createElement('li');
+        li.textContent = `${device.name || 'Unnamed'} (${device.address})`;
+        li.onclick = () => selectDevice(device.address);
+        list.appendChild(li);
+      });
+    } catch (err) {
+      console.error('Scan failed:', err);
+      list.innerHTML = '<li>Error during scan</li>';
+    }
+  }
+
+  async function selectDevice(address) {
+    try {
+      const response = await fetch('/select_device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address })
+      });
+      const text = await response.text();
+      alert('Server response: ' + text);
+    } catch (err) {
+      alert('Failed to send device to server');
+      console.error(err);
+    }
+  }
+</script>
+
+</body>
+</html>
