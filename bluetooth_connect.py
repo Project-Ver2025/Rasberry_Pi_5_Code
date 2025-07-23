@@ -20,6 +20,8 @@ def get_bt_info(mac):
 
 def pair_trust_connect(mac_address):
     print(f"Starting pairing process for {mac_address}")
+    # pexpect allows us to run commands through their 'command-line' interfaces
+    # in this case the bluetoothctl
     child = pexpect.spawn("bluetoothctl", echo=False)
    
     info = get_bt_info(mac_address)
