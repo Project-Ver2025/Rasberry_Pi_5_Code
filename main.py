@@ -123,6 +123,7 @@ def receive_text():
     text = request.data.decode()
     app_text = text
     if loop:
+        # a callback from another thread to run in the main event thread
         loop.call_soon_threadsafe(received_text_from_app.set)
         print(f"Received text: {text}")
     return "OK", 200
@@ -164,8 +165,13 @@ def record_audio_sync():
     return frames
 
 async def record_audio():
+    # worker threads that can run a blocking code in parallel
+    # spin up a temporary thread to run blocking code 
     with ThreadPoolExecutor() as executor:
+        # gets the current event loop
         loop = asyncio.get_event_loop()
+        # run the record_audio_sync in a background thread without blocking the event loop
+        # and await the result (wait until the completion)
         return await loop.run_in_executor(executor, record_audio_sync)
 
 # ---------- Camera Capture ----------------
@@ -493,6 +499,7 @@ async def watch_flask_trigger():
     global state, image_bytes, recognized_text, app_text, speech_task, speech_task_event
    
     while True:
+        # flag that is set when text comes in
         await received_text_from_app.wait()
        
         received_text_from_app.clear()
@@ -535,6 +542,7 @@ async def handle_main_button(loop):
         state = 1
         cancel_event.clear()
         record_stop_event.clear()
+        # schedule a task on the event loop as soon as possible
         recording_task = asyncio.create_task(record_audio())
 
     elif state == 1:
