@@ -349,10 +349,19 @@ def object_searching(recognized_text, loop):
 
 ## Task 2
 async def image_description(text):
+    """
+    This task captures an image, sends the image to Groq with user-provided instructions and uses the 
+    response to initiate a text to speech task.
+
+    Args:
+        text (str): prompt to be included in the query to Groq. 
+    """
     global speech_task, vision_model, speech_task_event
    
+    # Captures an image from the camera
     image_bytes = capture_image()
    
+    # Alternates between two model variants
     if vision_model:
         model_running = "meta-llama/llama-4-maverick-17b-128e-instruct"
         vision_model = 0
@@ -362,10 +371,12 @@ async def image_description(text):
    
    
     if image_bytes:
+            # Encodes image in base 64
             base_64_image = base64.b64encode(image_bytes).decode('utf-8')
            
             try:
                 print("Sending to Model")
+                # Sends user instructions with image to model
                 completion = client_groq.chat.completions.create(
                     model=model_running,
                     messages=[
@@ -391,20 +402,37 @@ async def image_description(text):
                     stream=False,
                     stop=None,
                 )
+
+                # Extracts response text from model output
                 response = completion.choices[0].message.content
                 print(f"Groq Response: {response}")
+
+                # Wait for any currently running speech tasks to finish
                 while speech_task_event.is_set():
                     await asyncio.sleep(0.1)
+
+                # Start new text to speech task with model response
                 speech_task = asyncio.create_task(text_to_speech(response))
+
+            # Handle and report any API related errors
             except Exception as e:
                 print(f"Error from Groq API: {e}")
 
 ## Task 3
 async def google_searching(recognized_text):
+    """
+    Sends an image and user prompt to Gemini with google search grounding. Uses the 
+    response to initiate a text to speech task.
+    
+    Args:
+        recognized_text (str): prompt to be included in the query to Gemini.
+    """
     global speech_task, speech_task_event
+
+    # Captures an image from the camera
     image_bytes = capture_image()
 
-
+    # Creates a grounding tool with google search capabilities
     grounding_tool = types.Tool(
     google_search=types.GoogleSearch()
     )
@@ -415,7 +443,7 @@ async def google_searching(recognized_text):
     )
    
     try:
-        # Make the request
+        # Send the image and user query to the Gemini model
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=[
@@ -424,19 +452,35 @@ async def google_searching(recognized_text):
                     ],
             config=config,
         )
+
         # Print the grounded response
         print(response.text)
+
+        # Wait for any currently running speech tasks to finish
         while speech_task_event.is_set():
             await asyncio.sleep(0.1)
+        
+        # Start new text to speech task with model response
         speech_task = asyncio.create_task(text_to_speech(response.text))
+
+    # Handle and report any API related errors
     except Exception as e:
         print(f"Error from Gemini API: {e}")
 
 ## Task 4
 async def text_description(recognized_text):
+    """
+    Sends an image of text and user prompt to Groq VLM. Uses the response to initiate a text to speech task.
+    
+    Args:
+        recognized_text (str): prompt to be included in the query to Gemini.
+    """
     global vision_model, speech_task_event
+
+    # Captures an image from the camera
     cropped_image = capture_image()
    
+    # Alternate between two model variants
     if vision_model:
         model_running = "meta-llama/llama-4-maverick-17b-128e-instruct"
         vision_model = 0
@@ -445,10 +489,12 @@ async def text_description(recognized_text):
         vision_model = 1
    
     if cropped_image:
+        # Encodes image in base 64
         base_64_image = base64.b64encode(cropped_image).decode('utf-8')
        
         try:
             print("Sending to Model")
+            # Send the image and prompt to the selected model
             completion = client_groq.chat.completions.create(
                 model=model_running,
                 messages=[
@@ -474,11 +520,19 @@ async def text_description(recognized_text):
                 stream=False,
                 stop=None,
             )
+
+            # Extracts response text from model output
             response = completion.choices[0].message.content
             print(f"Groq Response: {response}")
+
+            # Wait for any currently running speech tasks to finish
             while speech_task_event.is_set():
                 await asyncio.sleep(0.1)
+
+            # Start new text to speech task with model response
             speech_task = asyncio.create_task(text_to_speech(response))
+        
+        # Handle and report any API related errors
         except Exception as e:
             print(f"Error from Groq API: {e}")
                
@@ -486,11 +540,19 @@ async def text_description(recognized_text):
                
 ## Task 5
 async def help_function():
+    """
+    Triggers a text to speach task with predetermined 'help' message. 
+    """
     global speech_task_event
-   
+    
+    # Predefined help message
     text = "Help task reached, explain different functions / kind of inputs expected"
+
+    # Wait for any currently running speech tasks to finish
     while speech_task_event.is_set():
             await asyncio.sleep(0.1)
+    
+    # Start new text to speech task with model response
     speech_task = asyncio.create_task(text_to_speech(text))
    
 
