@@ -76,24 +76,47 @@ CHUNK = 1024
 WAVE_OUTPUT_FILENAME = "output.wav"
 
 
+
 # ---------- Flask App ---------------------
 app = Flask(__name__)
 
 # ---------- Website ---------------------
 @app.route("/")
 def index():
-    return render_template('index.html')
+    """
+    Route for the homepage. 
+    Renders the 'index.html' template to display the main interface of the web application.
+    """
+    
+    return render_template('index.html') # imported render_template function from flask library
    
 @app.route('/scan')
 def scan_devices():
+    """
+    Scans for nearby Bluetooth devices. 
+    
+    Returns:
+        JSON list of discovered Bluetooth devices with their names and addresses.
+    """
+    
     print("Scanning for Bluetooth devices...")
-    nearby_devices = bluetooth.discover_devices(duration=5, lookup_names=True)
-    devices = [{'address': addr, 'name': name} for addr, name in nearby_devices]
+    nearby_devices = bluetooth.discover_devices(duration=5, lookup_names=True)     # imported blutooth library function
+    devices = [{'address': addr, 'name': name} for addr, name in nearby_devices]   # list of avalible device names and address   
     print(f"Found {len(devices)} device(s)")
     return jsonify(devices)
 
+
+
 @app.route('/select_device', methods=['POST'])
 def select_device():
+    """
+    Receives the selected Bluetooth device mac address from the frontend app or website.
+    Saves it to a file and attempts to pair, trust, and connect to it.
+
+    Returns:
+        HTTP 200 if successful, 500 if an error occurs during connection.
+    """
+    
     data = request.get_json()
     address = data.get('address')
     try:
@@ -104,9 +127,19 @@ def select_device():
     except subprocess.CalledProcessError:
         return "Failed", 500
 
-# ---------- Phone ---------------------
+
+
+# ---------- Phone ---------------------??? app??? - what is the difference to the function above?
 @app.route('/receive_mac', methods=['POST'])
 def receive_mac():
+    """
+    Receives a MAC address from phone client.
+    Saves the MAC address and attempts to pair, trust, and connect.
+
+    Returns:
+        HTTP 200 if successful, 500 if pairing fails.
+    """
+    
     mac = request.data.decode().strip()
     print(f"Received MAC: {mac}")
     try:
@@ -117,28 +150,67 @@ def receive_mac():
     except subprocess.CalledProcessError:
         return "Failed", 500
 
+
+
 @app.route('/receive_text', methods=['POST'])
 def receive_text():
+    """
+    Receives text data from the app (e.g., command or instruction).
+    If event loop is active, signal event for main thread to process the text.
+
+    Returns:
+        HTTP 200 acknowledgment.
+    """
+    
     global app_text, received_text_from_app, loop
     text = request.data.decode()
     app_text = text
     if loop:
-        # a callback from another thread to run in the main event thread
+        # Signal the main thread to process the received text
         loop.call_soon_threadsafe(received_text_from_app.set)
         print(f"Received text: {text}")
     return "OK", 200
 
+
+
 def run_flask():
+    """
+    Starts the Flask web server on all available IP addresses (0.0.0.0) using port 5000.
+    Disables auto-reloading for better thread safety.
+    """
+    
     app.run(host='0.0.0.0', port=5000, use_reloader=False)
 
 
 # ---------- Audio Handling ----------------
 def audio_callback(indata, frames, time, status):
+    """
+    Callback function for the audio stream.
+    
+    Args:
+        indata (numpy.ndarray): Audio input buffer.
+        frames (int): Number of frames.
+        time: Time information.
+        status: Status of the audio input.
+
+    Adds the incoming audio buffer to the shared queue if status is active.
+    """
+    
     if status:
         print(f"Audio status: {status}")
     q.put(indata.copy())
 
+
+
 def record_audio_sync():
+     """
+    Synchronously records audio until either the stop or cancel event is set.
+    Utilises the audio_callback function within the Input Stream.
+    
+    Returns:
+        List of numpy arrays containing audio data chunks.
+    """
+    
     device_info = sd.query_devices(None, "input")
     samplerate = int(device_info["default_samplerate"])
     frames = []
@@ -149,7 +221,9 @@ def record_audio_sync():
         print("Recording... Press stop or cancel to end.")
         while not record_stop_event.is_set() and not cancel_event.is_set():
             try:
+                # get data from the Input Stream that utilises audio_callback
                 data = q.get(timeout=0.5)
+                # append this data to the array of audio frames to be combined later
                 frames.append(data)
             except queue.Empty:
                 continue
@@ -164,18 +238,35 @@ def record_audio_sync():
 
     return frames
 
+
+
 async def record_audio():
-    # worker threads that can run a blocking code in parallel
-    # spin up a temporary thread to run blocking code 
+    """
+    Asynchronously records audio using a thread pool executor to avoid blocking the event loop for the rest of the devices execution
+    
+    Utilises the record_audio_sync function.
+    
+    Returns:
+        Audio frames recorded by `record_audio_sync()`.
+    """
+
     with ThreadPoolExecutor() as executor:
         # gets the current event loop
         loop = asyncio.get_event_loop()
-        # run the record_audio_sync in a background thread without blocking the event loop
-        # and await the result (wait until the completion)
+        # run the record_audio_sync in a background thread without blocking the event loop and await the result (wait until the completion)
         return await loop.run_in_executor(executor, record_audio_sync)
+
+
 
 # ---------- Camera Capture ----------------
 def capture_image():
+    """
+    Captures a single frame from the webcam and encodes it as JPEG bytes.
+
+    Returns:
+        Bytes of the JPEG-encoded image if successful, None otherwise.
+    """
+    
     ret, frame = webcam.read()
     if not ret:
         print("Failed to capture image from webcam")
@@ -183,11 +274,10 @@ def capture_image():
     _, buffer = cv2.imencode('.jpg', frame)
     return buffer.tobytes()
 
+
+
+
 # ---------- Text to Speech ----------------
-
-
-       
-       
        
 async def text_to_speech(text):
     global speech_task_event
