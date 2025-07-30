@@ -14,6 +14,7 @@ import time
 import cv2
 import threading
 import sounddevice as sd
+import soundfile as sf
 import queue
 import os
 import numpy as np
@@ -280,9 +281,18 @@ def capture_image():
 # ---------- Text to Speech ----------------
        
 async def text_to_speech(text):
+    """
+    This function takes a response string that is to be read to the user and converts it to audio bytes to be streamed over
+    Bluetooth to the connected audio device.
+    
+    Args:
+        text (str): The response string text to be converted to audio by the model. 
+
+    """
     global speech_task_event
     speech_task_event.set()
 
+    # Set up the file to save audio to and the speech model parameters
     speech_file_path = "speech.wav"
     model = "playai-tts"
     voice = "Cheyenne-PlayAI"
@@ -297,26 +307,28 @@ async def text_to_speech(text):
             response_format=response_format
         )
        
+       # Save the model response as audio bytes so that it can be read
         audio_bytes = io.BytesIO(response.content)
 
         # Load the WAV file
         data, samplerate = sf.read(audio_bytes, dtype='int16')
 
-        # Play audio asynchronously
+        # Play audio asynchronously over bluetooth
         sd.play(data, samplerate=samplerate, blocking=False)
 
         # Wait for playback to finish or be cancelled
         while sd.get_stream().active:
             await asyncio.sleep(0.1)
-            if cancel_event.is_set():
+            if cancel_event.is_set(): # Cancel the audio when the cancel button is pressed
                 sd.stop()
                 raise asyncio.CancelledError
 
     except asyncio.CancelledError:
-        sd.stop()
+        sd.stop() # Stop the bluetooth stream if audio reading fails
         raise
 
     finally:
+        # Reading text task finished so clear the event
         speech_task_event.clear()
         if os.path.exists(speech_file_path):
             os.remove(speech_file_path)  # Clean up the temporary file
@@ -327,7 +339,17 @@ async def text_to_speech(text):
        
 # ---------- Task Determination -----------------
 def task_selection(text):
-   
+    """
+    Converts the text converted user query to a use case classification using groq.
+    
+    Args:
+        text (str): Unused. 
+
+    Returns:
+        A string of a number from 1-5 representing the task classification of the user query.
+    """
+    # The question that is asked to the model to classify the user's text string into a use case.
+    # recognized_text is a global containig the query text string converted from audio recorded from the user.
     input_message = f"Classify the following user input into one of these categories by providing only the corresponding number. \
                     Do not include any additional text or explanation. User Input: {recognized_text}. Categories: \
                     1. **Live Task Execution:** The user wants an action performed immediately based on a detected event or condition. (e.g., Tell me when you see a cat, Notify me if the light turns red.) \
@@ -336,7 +358,7 @@ def task_selection(text):
                     4. **Image Reading:** The user wants something read or some information from text in the image. (e.g., Can you read this sign?, Does this have gluten?, What are the ingredients in this?, How much salt is in this?)  \
                     5. **Help:** The user wants an explanation of the functions available (e.g., Help)"
 
-   
+    # Send the user query to qroq to generate a classification
     chat_completion = client_groq.chat.completions.create(
         messages=[
             {
@@ -345,7 +367,8 @@ def task_selection(text):
             }
         ],
         model="llama-3.3-70b-versatile",)
-       
+    
+    # Return the string of the task classification number.
     return chat_completion.choices[0].message.content
    
 
@@ -353,10 +376,20 @@ def task_selection(text):
 # ---------- Tasks -----------------
 ## Task 1 -> threads
 def object_searching(recognized_text, loop):
+    """
+    Determines what object the user is looking for based on their text query and takes an image of their environment to search for it.
+    Alerts the user when the object is found.
+    
+    Args:
+        recognized_text (str): The converted text of the user query to search for an object.
+        loop (asyncio): The event loop that runs on a separate thread to read the model response to the user when the object is found.
+
+    """
     global vision_model, cancel_event, speech_task, speech_task_event
    
     object_found = False
    
+    # Send the user query to find an object and to qroq and generate a response of what is being searched for
     chat_completion = client_groq.chat.completions.create(
         messages=[
             {
@@ -365,16 +398,18 @@ def object_searching(recognized_text, loop):
             }
         ],
         model="llama-3.3-70b-versatile",)
-       
+    
+    # Extract the response from the model and print it to consol
     searching = chat_completion.choices[0].message.content
     print("User searching for ", searching)
-   
+    
+    # Check if no object to search for is identified in the user query and return
     match = re.search(r"no object", searching, re.IGNORECASE)
     if match:
         print("No object in text")
         return
    
-   
+    # Configure the vision model to use to search for the object (switch between them to avoid runnion out of query allowance).
     while not object_found:
         if vision_model:
             model_running = "meta-llama/llama-4-maverick-17b-128e-instruct"
@@ -383,16 +418,18 @@ def object_searching(recognized_text, loop):
             model_running = "meta-llama/llama-4-scout-17b-16e-instruct"
             vision_model = 1
        
-       
+        # Stop searching if the cancel button is pressed
         if cancel_event.is_set():
             return
-       
+        
+        # Take an image from the camera and convert it to base 64 encoding
         image_bytes = capture_image()
         if image_bytes and searching.strip():
             base_64_image = base64.b64encode(image_bytes).decode('utf-8')
            
             try:
                 print("Sending to Model")
+                # Boiler plate to setup groq for searching
                 completion = client_groq.chat.completions.create(
                     model=model_running,
                     messages=[
@@ -419,11 +456,14 @@ def object_searching(recognized_text, loop):
                     stop=None,
                 )
                
+                # Extract the model response
                 response = completion.choices[0].message.content
                 print(f"Groq Response: {response}")
                
+                # Check if the desired object has been detected in the image
                 match = re.search(r"yes", response, re.IGNORECASE)
                
+                # Alert the user the object has been found by creating an text response that is converted to audio using text_to_speech()
                 if match:
                     print(f"Found {searching}")
                     object_found = True
