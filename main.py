@@ -808,52 +808,82 @@ async def handle_cancel_button():
 
 # ---------- GPIO Button Watching ----------
 def watch_gpio_button(loop, chip_path, line_offsets):
+"""
+Monitors GPIO button inputs and schedules corresponding async handlers on the main event loop.
+
+Args:
+    loop (asyncio.AbstractEventLoop): The asyncio event loop to schedule coroutines on.
+    chip_path (str): Path to the GPIO chip (e.g., "/dev/gpiochip0").
+    line_offsets (list[int]): GPIO pin numbers to monitor for button presses.
+    
+Returns:
+      None
+"""
+    # Configure edge detection and debounce settings for each GPIO line
     config = {offset: gpiod.LineSettings(edge_detection=Edge.RISING, debounce_period=timedelta(milliseconds=20)) for offset in line_offsets}
+    
+    # Request access to the GPIO lines with the specified configuration
     with gpiod.request_lines(chip_path, consumer="voice-image-button", config=config) as request:
         while True:
+            # Read all rising edge events from the configured GPIO lines
             for event in request.read_edge_events():
                 if event.line_offset == 2:
                     # This method allows us to schedule the given task which may be running on a different thread
                     # back on the original thread
                     asyncio.run_coroutine_threadsafe(handle_main_button(loop), loop)
                 elif event.line_offset == 3:
-                    asyncio.run_coroutine_threadsafe(handle_cancel_button(), loop)
+                    asyncio.run_coroutine_threadsafe(handle_cancel_button(), loop)  # Schedule the cancel button handler on the event loop
 
 
 
 # ---------- Main Entry --------------------
 async def main():
+    """
+    retrieves the currently running asyncio event loop so it can be used for scheduling asynchronous tasks
+
+    Returns:
+        none
+    """
+    
     global loop, state, recording_task, cancel_event, record_stop_event
    
-    loop = asyncio.get_running_loop()
+    loop = asyncio.get_running_loop() # Get the currently running asyncio event loop
    
+    # Start a daemon thread to monitor GPIO button input (pins 2 and 3)
     gpio_thread = threading.Thread(target=watch_gpio_button, args=(loop, "/dev/gpiochip0", [2, 3]), daemon=True)
     gpio_thread.start()
-   
+    
+   # Check if there is a previously saved Bluetooth MAC address
     if os.path.getsize("saved_mac.txt") == 0:
         print("No saved device")
     else:
+        # Read the MAC address from file and attempt to pair, trust, and connect
         with open("saved_mac.txt", 'r') as file:
             content = file.read()
             pair_trust_connect(content)
-   
+
+    # Start a daemon thread to run the Flask web server
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
- 
+
+    # Initialize global state and reset control events
     state = 0
     recording_task = None
     cancel_event.clear()
     record_stop_event.clear()
 
     try:
+        # Begin watching for Flask-triggered events asynchronously
         await watch_flask_trigger()
     except Exception as e:
+        # Log any exception that occurs during GPIO monitoring
         print(f"GPIO error: {e}")
 
+# Entry point when the script is run directly
 if __name__ == "__main__":
     with open("/home/ver/log_out.txt", "a") as f:
-        f.write("Started")
+        f.write("Started") # Log startup
     try:
-        asyncio.run(main())
+        asyncio.run(main()) # Run the main async function in the event loop
     finally:
-        webcam.release()
+        webcam.release() # Ensure the webcam is released on shutdown
