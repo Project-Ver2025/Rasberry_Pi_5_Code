@@ -726,21 +726,36 @@ async def watch_flask_trigger():
 
 # ---------- Button Handlers ---------------
 async def handle_main_button(loop):
+    """
+    Handles the main button press to initiate voice recording and task execution
+
+    If state is 0, it starts voice recording. If state is 1, it stops recording then transcribes audio, determines task, 
+    and executes the corresponding function (e.g., object search, image description)
+
+    Args:
+        loop (asyncio.AbstractEventLoop): The main asyncio event loop used to schedule asynchronous tasks from other threads
+    """
     global state, image_bytes, recognized_text, recording_task, speech_task, searching_thread, speech_task_event
 
     if state == 0:
         print("Starting voice input...")
         # ~ image_bytes = capture_image()
-        state = 1
+
+        #change state to indicate start recording in progress
+        state = 1 
+
+        #reset event flags
         cancel_event.clear()
         record_stop_event.clear()
+
         # schedule a task on the event loop as soon as possible
         recording_task = asyncio.create_task(record_audio())
 
     elif state == 1:
-        record_stop_event.set()
-        await recording_task
+        record_stop_event.set() #signal recording to stop
+        await recording_task #wait for the recording to complete
 
+        #if cancel button is pressed, abort recording and reset state
         if cancel_event.is_set():
             speech_task_event.clear()
             print("Recording cancelled")
@@ -754,6 +769,7 @@ async def handle_main_button(loop):
        
        
         #### Cloud Groq Whisper tts
+        #transcribe the audio file using Groq's Whisper API
         filename = os.path.dirname(__file__) + "/output.wav"
        
         with open(filename, "rb") as file:
@@ -765,38 +781,50 @@ async def handle_main_button(loop):
             recognized_text = transcription.text
        
         print(f"Recognised text: {recognized_text}")
-       
+
+        #determine task based on the transcribed text
         task = task_selection(recognized_text).strip()
         print("Task: ", task)
-       
+
+        #if no recognised text, reset and exit
         if not recognized_text.strip():
             print("No text found")
             state = 0
             return
-           
+
+        #dispatch task based on classification result
         if task == "1":
             searching_thread = threading.Thread(target=object_searching, args=(recognized_text, loop), daemon=True)
             searching_thread.start()
         elif task == "2":
-            await image_description(recognized_text.strip())
+            await image_description(recognized_text.strip()) #describe image
         elif task == "3":
-            await google_searching(recognized_text.strip())
+            await google_searching(recognized_text.strip()) #do google search
         elif task == "4":
-            await text_description(recognized_text.strip())
+            await text_description(recognized_text.strip()) #read recognised text
         elif task == "5":
-            await help_function()
+            await help_function() #help
 
+        #reset state
         state = 0
 
 async def handle_cancel_button():
+    """
+    Handles the cancel button press to stop any recording or processing and resets system state.
+    
+    """
     global state, recording_task, speech_task
     print("Cancel pressed. Aborting operation.")
+    
+    #trigger cancellation for audio and speech tasks
     cancel_event.set()
     record_stop_event.set()
 
+    #cancel recording if still running
     if recording_task and not recording_task.done():
         recording_task.cancel()
 
+    #cancel speech if still running
     if speech_task and not speech_task.done():
         speech_task.cancel()
         try:
@@ -804,7 +832,7 @@ async def handle_cancel_button():
         except asyncio.CancelledError:
             print("Speech cancelled")
 
-    state = 0
+    state = 0 #reset system state
 
 # ---------- GPIO Button Watching ----------
 def watch_gpio_button(loop, chip_path, line_offsets):
